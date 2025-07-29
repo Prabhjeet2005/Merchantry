@@ -3,11 +3,11 @@ const { errorCreator } = require("./responseCreator")
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const generateToken = (username,role)=>{
-  if(!username || !role){
-    errorCreator("Either Username or Role Missing",404)
+const generateToken = (email,role)=>{
+  if(!email || !role){
+    errorCreator("Either email or Role Missing",404)
   }
-  const token = sign({username,role},JWT_SECRET,{expiresIn:"1d"})
+  const token = sign({email,role},JWT_SECRET,{expiresIn:"1d"})
   if(!token){
     errorCreator("Error Creating Token")
   }
