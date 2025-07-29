@@ -11,21 +11,20 @@ const productSchema = new Schema({
 	price: { type: Decimal128 },
 	description: { type: String },
 	category: { type: String },
-	image: { type: String },
+	thumbnail: { type: Array },
 	rating: {
-		rate: Number,
-		count: Number,
+		type: Decimal128,
 	},
 	PaymentMethods: {
 		type: [String],
 	},
-	discountedPrice: {
+	discountPercentage: {
 		type: Decimal128,
 	},
-	quantity:{
-		type:Number,
-		default:1
-	}
+	stock: {
+		type: Number,
+		default: 1,
+	},
 });
 
 const userSchema = new Schema(
@@ -130,10 +129,152 @@ userSchema.statics.updatedPassword = async (email, password) => {
 		},
 		{ new: true }
 	);
-	if(!updatedUser){
-		errorCreator("Error While Updating Password",401)
+	if (!updatedUser) {
+		errorCreator("Error While Updating Password", 401);
 	}
 	return updatedUser?.toObject();
+};
+
+// -------------------------- Cart --------------------------
+
+userSchema.statics.getCartItems = async (email) => {
+	const userCart = await UserModel.findOne({ email }, { cart: 1 });
+	if (!userCart) {
+		errorCreator("Error Displaying Cart", 401);
+	}
+	return userCart?.toObject();
+};
+
+userSchema.statics.addToCart = async (email, product) => {
+	const existingProductInCart = (
+		await UserModel.findOne({ email, "cart.cart.id": product.id })
+	)?.toObject();
+	if (existingProductInCart) {
+		return await UserModel.increment(email, product);
+	}
+	const { cart } = await UserModel.findOneAndUpdate(
+		{ email },
+		{
+			$push: { "cart.cart": { ...product, quantity: 1 } },
+			$inc: { "cart.totalCount": 1, "cart.totalValue": product.price },
+		},
+		{ new: true }
+	);
+	if (!cart) {
+		errorCreator("Error Adding Product To Cart", 400);
+	}
+	return cart?.toObject();
+};
+
+userSchema.statics.increment = async (email, product) => {
+	const exisitingProductInCart = (
+		await UserModel.findOne({ email, "cart.cart.id": product.id })
+	)?.toObject();
+	if (!exisitingProductInCart) {
+		return await UserModel.addToCart(email, product);
+	}
+
+	const userData = (
+		await UserModel.findOneAndUpdate(
+			{ email, "cart.cart.id": product.id },
+			{
+				$inc: {
+					"cart.cart.$.quantity": 1,
+					"cart.totalCount": 1,
+					"cart.totalValue": product.price,
+				},
+			},
+			{ new: true }
+		)
+	)?.toObject();
+	if (!userData) {
+		errorCreator("Error Incrementing", 400);
+	}
+	return userData.cart;
+};
+
+userSchema.statics.decrement = async (email, product) => {
+	const exisitingProductInCart = (
+		await UserModel.findOne({ email, "cart.cart.id": product.id })
+	)?.toObject();
+	if (!exisitingProductInCart) {
+		errorCreator("Product Not Found In Cart", 404);
+	}
+	const { quantity } = exisitingProductInCart.cart.cart.find(
+		({ id }) => id === product.id
+	);
+
+	if (quantity === 1) {
+		return await UserModel.removeProduct(email, product);
+	}
+
+	const decrementProductFromCart = (
+		await UserModel.findOneAndUpdate(
+			{ email,"cart.cart.id":product.id },
+			{
+				$inc: { 
+					"cart.totalCount": -1,
+					"cart.totalValue":-product.price,
+					"cart.cart.$.quantity":-1
+				},
+			},
+			{new:true}
+		)
+	)?.toObject();
+
+	if(!decrementProductFromCart){
+		errorCreator("Error Decrementing")
+	}
+	return decrementProductFromCart.cart;
+};
+
+userSchema.statics.removeProduct = async (email, product) => {
+	const existingProductInCart = (
+		await UserModel.findOne({ email, "cart.cart.id": product.id })
+	)?.toObject();
+	if (!existingProductInCart) {
+		errorCreator("Product Not Found In Cart", 404);
+	}
+
+	const { quantity } = existingProductInCart.cart.cart.find(
+		({ id }) => id === product.id
+	);
+	console.log("QTY:", quantity);
+	const removedProductFromCart = (
+		await UserModel.findOneAndUpdate(
+			{ email },
+			{
+				$pull: { "cart.cart": { id: product.id } },
+				$inc: {
+					"cart.totalCount": -quantity,
+					"cart.totalValue": -quantity * product.price,
+				},
+			},
+			{ new: true }
+		)
+	)?.toObject();
+	if (!removedProductFromCart) {
+		errorCreator("Error Removing Product", 400);
+	}
+	return removedProductFromCart.cart;
+};
+
+userSchema.statics.clearCart = async (email) => {
+	const { cart } = await UserModel.findOneAndUpdate(
+		{ email },
+		{
+			$set: {
+				"cart.cart": [],
+				"cart.totalCount": 0,
+				"cart.totalValue": 0,
+			},
+		},
+		{ new: true }
+	);
+	if (!cart) {
+		errorCreator("Error Clearing Cart");
+	}
+	return cart;
 };
 
 const UserModel = model("users", userSchema);
