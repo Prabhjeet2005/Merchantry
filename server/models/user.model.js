@@ -70,7 +70,7 @@ const userSchema = new Schema(
 		onBoarding: {
 			status: {
 				type: String,
-				enum: ["Pending", "Rejected", "Accepted"],
+				enum: ["Pending", "Rejected", "Approved"],
 				required: function () {
 					return this.role === "merchant";
 				},
@@ -79,9 +79,6 @@ const userSchema = new Schema(
 			requestDate: Date,
 			statusUpdatedBy: {
 				type: String,
-				required: function () {
-					return this.role === "merchant";
-				},
 			},
 		},
 		products: [productSchema],
@@ -91,10 +88,14 @@ const userSchema = new Schema(
 			enum: ["user", "admin", "merchant"],
 			required: [true, "Role Required"],
 		},
+		actions: {
+			type: [Object],
+		},
 	},
 	{ toObject: { getters: true }, timestamps: true }
 );
 
+// -------------------------- USER --------------------------
 const sanitizedUserData = (userData) => {
 	const { password, secret, _id, __v, ...dataToReturn } = userData;
 	return dataToReturn;
@@ -210,20 +211,20 @@ userSchema.statics.decrement = async (email, product) => {
 
 	const decrementProductFromCart = (
 		await UserModel.findOneAndUpdate(
-			{ email,"cart.cart.id":product.id },
+			{ email, "cart.cart.id": product.id },
 			{
-				$inc: { 
+				$inc: {
 					"cart.totalCount": -1,
-					"cart.totalValue":-product.price,
-					"cart.cart.$.quantity":-1
+					"cart.totalValue": -product.price,
+					"cart.cart.$.quantity": -1,
 				},
 			},
-			{new:true}
+			{ new: true }
 		)
 	)?.toObject();
 
-	if(!decrementProductFromCart){
-		errorCreator("Error Decrementing")
+	if (!decrementProductFromCart) {
+		errorCreator("Error Decrementing");
 	}
 	return decrementProductFromCart.cart;
 };
@@ -275,6 +276,45 @@ userSchema.statics.clearCart = async (email) => {
 		errorCreator("Error Clearing Cart");
 	}
 	return cart;
+};
+
+// -------------------------- MERCHANT --------------------------
+
+// -------------------------- ADMIN --------------------------
+
+userSchema.statics.getAllMerchants = async () => {
+	const merchantData = await UserModel.find({ role: "merchant" },{projection:{products:0}});
+	return merchantData;
+};
+
+userSchema.statics.onBoardingStatus = async (
+	adminEmail,
+	merchantEmail,
+	action
+) => {
+	const merchantOnBoardingUpdate = await UserModel.findOneAndUpdate(
+		{ email: merchantEmail },
+		{
+			$set: { onBoarding: { status: action,statusUpdatedBy:adminEmail } },
+		},
+		{new:true}
+	);
+	if(!merchantOnBoardingUpdate){
+		errorCreator("Unable To Update Merchant Status")
+	}
+	const payload = {merchantEmail,adminEmail,action}
+
+	const adminUpdationAction = (await UserModel.findOneAndUpdate(
+		{email:adminEmail},
+		{$push:{actions:payload}},
+		{new:true}
+	))?.toObject();
+
+	if(!adminUpdationAction){
+		errorCreator("Unable To Update Action Of Admin",400)
+	}
+	return merchantOnBoardingUpdate?.toObject()
+
 };
 
 const UserModel = model("users", userSchema);
